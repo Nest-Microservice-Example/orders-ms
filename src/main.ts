@@ -31,7 +31,7 @@ async function bootstrap() {
     },
   );
 
-  app.useGlobalPipes(validationPipe);
+  // app.useGlobalPipes(validationPipe);
 
   await app.listen();
 
