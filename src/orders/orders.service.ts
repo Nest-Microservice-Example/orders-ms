@@ -1,19 +1,107 @@
-import { HttpStatus, Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  HttpStatus,
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ChangeOrderStatusDto, CreateOrderDto } from './dto';
 import { PrismaClient } from '@prisma/client';
 import { PaginationDto } from '../common/dto';
-import { RpcException } from '@nestjs/microservices';
+import { ClientProxy, RpcException } from '@nestjs/microservices';
+import { PRODUCT_SERVICE } from '../config';
+import { firstValueFrom } from 'rxjs';
 
 @Injectable()
 export class OrdersService extends PrismaClient implements OnModuleInit {
+  private readonly logger = new Logger(OrdersService.name);
+
+  constructor(
+    @Inject(PRODUCT_SERVICE) private readonly productsClient: ClientProxy,
+  ) {
+    super();
+  }
+
   async onModuleInit() {
     await this.$connect();
   }
 
-  create(createOrderDto: CreateOrderDto) {
-    return this.order.create({
-      data: createOrderDto,
-    });
+  async create(createOrderDto: CreateOrderDto) {
+    try {
+      const productIds = createOrderDto.items.map((item) => item.productId);
+
+      const products: any[] = await firstValueFrom(
+        this.productsClient.send({ cmd: 'validate_products' }, productIds),
+      );
+
+      const totalAmount = createOrderDto.items.reduce((acc, item) => {
+        const product = products.find(
+          (product) => product.id === item.productId,
+        );
+
+        const amount = product.price * item.quantity;
+
+        return acc + amount;
+      }, 0);
+
+      const totalItems = createOrderDto.items.reduce((acc, item) => {
+        return acc + item.quantity;
+      }, 0);
+
+      const items = createOrderDto.items.map((item) => {
+        const product = products.find(
+          (product) => product.id === item.productId,
+        );
+
+        return {
+          productId: item.productId,
+          quantity: item.quantity,
+          price: product.price,
+        };
+      });
+
+      const order = await this.order.create({
+        data: {
+          totalAmount,
+          totalItems,
+          items: {
+            createMany: {
+              data: items,
+            },
+          },
+        },
+        include: {
+          items: {
+            select: {
+              quantity: true,
+              productId: true,
+              price: true,
+            },
+          },
+        },
+      });
+
+      return {
+        ...order,
+        items: order.items.map((item) => {
+          const product = products.find(
+            (product) => product.id === item.productId,
+          );
+
+          return {
+            ...item,
+            name: product.name,
+          };
+        }),
+      };
+    } catch (e) {
+      this.logger.error(e?.message || e);
+
+      throw new RpcException({
+        status: HttpStatus.BAD_REQUEST,
+        message: `Check Logs`,
+      });
+    }
   }
 
   async findAll(paginationDto: PaginationDto) {
@@ -42,6 +130,15 @@ export class OrdersService extends PrismaClient implements OnModuleInit {
   async findOne(id: string) {
     const order = await this.order.findFirst({
       where: { id },
+      include: {
+        items: {
+          select: {
+            quantity: true,
+            productId: true,
+            price: true,
+          },
+        },
+      },
     });
 
     if (!order) {
@@ -51,7 +148,25 @@ export class OrdersService extends PrismaClient implements OnModuleInit {
       });
     }
 
-    return order;
+    const productIds = order.items.map((item) => item.productId);
+
+    const products: any[] = await firstValueFrom(
+      this.productsClient.send({ cmd: 'validate_products' }, productIds),
+    );
+
+    return {
+      ...order,
+      items: order.items.map((item) => {
+        const product = products.find(
+          (product) => product.id === item.productId,
+        );
+
+        return {
+          ...item,
+          name: product.name,
+        };
+      }),
+    };
   }
 
   async changeStatus(changeOrderStatusDto: ChangeOrderStatusDto) {

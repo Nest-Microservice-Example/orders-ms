@@ -7,4 +7,10 @@ export default (): Config => ({
   database: {
     url: process.env.DATABASE_URL,
   },
+  microservice: {
+    products: {
+      port: parseInt(process.env.PRODUCTS_MICROSERVICE_PORT || '3001', 10),
+      host: process.env.PRODUCTS_MICROSERVICE_HOST,
+    },
+  },
 });
