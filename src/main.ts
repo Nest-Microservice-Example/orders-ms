@@ -17,16 +17,14 @@ async function bootstrap() {
 
   const config = context.get(ConfigService);
 
-  const PORT = config.get<number>(ConfigEnum.PORT, { infer: true });
-  const HOST = config.get<number>(ConfigEnum.HOST, { infer: true });
+  const NATS_SERVERS = config.get<string[]>(ConfigEnum.NATS, { infer: true });
 
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(
     AppModule,
     {
-      transport: Transport.TCP,
+      transport: Transport.NATS,
       options: {
-        port: PORT,
-        host: HOST,
+        servers: NATS_SERVERS,
       },
     },
   );
@@ -35,7 +33,7 @@ async function bootstrap() {
 
   await app.listen();
 
-  logger.log(`Orders Microservice running on port ${PORT}`);
+  logger.log(`Orders Microservice running`);
 }
 
 bootstrap();
